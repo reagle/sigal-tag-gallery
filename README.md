@@ -150,6 +150,14 @@ Idempotency: a per-tag hash of member paths + source mtimes (plus a hash of the
 whole tag set) is cached in `<destination>/<base_path>/.tag_gallery_cache.json`;
 unchanged tag pages are skipped on rebuild.
 
+**Note:** the cache keys on the photos and the tag set, *not* on the template
+content. After editing `tag_album.html` (or the plugin itself), clear the cache
+so existing tag pages re-render:
+
+```sh
+rm <destination>/tag/.tag_gallery_cache.json   # then re-run `sigal build`
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
