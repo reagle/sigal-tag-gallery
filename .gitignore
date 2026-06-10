@@ -1,3 +1,7 @@
+# This plugin ships a Jinja template; override a global "*.html" ignore so it
+# is tracked (see ~/.gitignore_global).
+!templates/*.html
+
 # Python
 __pycache__/
 *.py[cod]

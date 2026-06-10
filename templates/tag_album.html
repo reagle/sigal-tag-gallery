@@ -1,0 +1,44 @@
+{# Tag page: reuses the theme's album.html (PhotoSwipe head/footer) but renders
+   a navigational caption — filename tokens link to their tag pages, and the
+   year/month link to the source albums. Autoescape stays on; only the literal
+   <a> markup here is raw, while {{ href }}/{{ label }} are escaped. #}
+{% extends "album.html" %}
+
+{% macro caption(media) %}
+  {%- if media.album_crumbs %}
+    {%- for label, href in media.album_crumbs %}<a href="{{ href }}">{{ label }}</a> / {% endfor -%}
+  {%- endif -%}
+  {% for label, href in media.name_parts -%}
+    {% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}{{ label }}{% endif %}{{ "-" if not loop.last }}
+  {%- endfor %}.{{ media.dst_filename.rsplit(".", 1)[-1] }}
+{% endmacro %}
+
+{% block content %}
+  <div class="gallery" itemscope itemtype="http://schema.org/ImageGallery">
+    {% for media in album.medias %}
+      {% if media.type == "image" %}
+        <figure class="gallery__img--secondary thumbnail"
+                itemprop="associatedMedia" itemscope itemtype="http://schema.org/ImageObject">
+          <a href="{{ media.url }}" itemprop="contentUrl" data-size="{{ media.size.width }}x{{ media.size.height }}">
+            <img src="{{ theme.url }}/echo/blank.gif"
+                 data-echo="{{ media.thumbnail }}"
+                 alt="{{ media.url }}" itemprop="thumbnail" title="{{ media.exif.datetime }}" />
+          </a>
+          <figcaption itemprop="caption description">{{ caption(media) }}</figcaption>
+        </figure>
+      {% endif %}
+      {% if media.type == "video" %}
+        <figure class="gallery__img--secondary thumbnail"
+                itemprop="associatedMedia" itemscope itemtype="http://schema.org/ImageObject">
+          <a href="{{ media.url }}" itemprop="contentUrl" data-type="video"
+             data-video='<div class="video"><div class="video__container"><video controls><source src="{{ media.url }}" type="{{ media.mime }}" /></video></div></div>'>
+          <img src="{{ theme.url }}/echo/blank.gif"
+               data-echo="{{ media.thumbnail }}"
+               alt="{{ media.thumbnail }}" itemprop="thumbnail" title="" />
+          </a>
+          <figcaption itemprop="caption description">{{ caption(media) }}</figcaption>
+        </figure>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endblock %}
