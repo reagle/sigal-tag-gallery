@@ -34,10 +34,12 @@ import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader
+from natsort import natsort_keygen, ns
 from PIL import Image, IptcImagePlugin
 from sigal import signals
 from sigal.writer import THEMES_PATH, AbstractWriter
@@ -58,6 +60,10 @@ DEFAULTS: dict[str, Any] = {
     "min_count": 1,  # skip tags with fewer than this many images
     "title": "Tags",  # title of the tag-list index page
     "month_names": True,  # caption crumb months as names ("June") vs numbers ("06")
+    # Thumbnail order on tag pages. None inherits sigal's gallery-wide
+    # medias_sort_attr / medias_sort_reverse; set either to override just here.
+    "sort_attr": None,  # "filename" | "date" | "meta.<key>" | None (inherit)
+    "sort_reverse": None,  # True | False | None (inherit)
 }
 
 #: Per-build shared state, populated once on gallery_initialized and reused by
@@ -281,6 +287,7 @@ class _PseudoAlbum:
         index_url: str,
         author: str | None,
         description: str = "",
+        summary: str = "",
         medias: list[Any] | None = None,
         albums: list[Any] | None = None,
         breadcrumb: list[tuple[str, str]] | None = None,
@@ -291,6 +298,7 @@ class _PseudoAlbum:
         self.index_url = index_url
         self.author = author
         self.description = description
+        self.summary = summary
         self.medias = medias or []
         self.albums = albums or []
         self.breadcrumb = breadcrumb or []
@@ -313,12 +321,14 @@ class _AlbumCaptionWrapper:
     re-exposes as ``_MediaProxy`` objects whose ``page_dir`` is the album's own
     directory (so ``url``/``thumbnail`` come out identical to sigal's). Each
     proxy adds ``name_parts``, which the theme's caption renders as filename
-    tokens linked to tag pages.
+    tokens linked to tag pages. It also exposes ``summary`` (count + sort order)
+    so the theme can show the same header tag pages have.
     """
 
-    def __init__(self, album: Any, ctx: _LinkContext) -> None:
+    def __init__(self, album: Any, ctx: _LinkContext, summary: str = "") -> None:
         self._album = album
         self._ctx = ctx
+        self.summary = summary
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._album, name)
@@ -391,6 +401,83 @@ def _signature(medias: Iterable[Any]) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
+def _resolve_sort(
+    settings: dict[str, Any], options: dict[str, Any]
+) -> tuple[str, bool]:
+    """Resolve the tag-page media sort, falling back to sigal's gallery-wide one.
+
+    The plugin's ``sort_attr`` / ``sort_reverse`` win when set; ``None`` (the
+    default) inherits ``medias_sort_attr`` / ``medias_sort_reverse``.
+    """
+    attr = options.get("sort_attr") or settings.get("medias_sort_attr", "filename")
+    reverse = options.get("sort_reverse")
+    if reverse is None:
+        reverse = settings.get("medias_sort_reverse", False)
+    return attr, bool(reverse)
+
+
+def _sort_label(attr: str, reverse: bool) -> str:
+    """Human-readable thumbnail order, for the page summary line.
+
+    >>> _sort_label("date", True)
+    'newest first'
+    >>> _sort_label("date", False)
+    'oldest first'
+    >>> _sort_label("filename", False)
+    'A–Z'
+    """
+    if attr == "date":
+        return "newest first" if reverse else "oldest first"
+    return "Z–A" if reverse else "A–Z"
+
+
+def _album_summary(album: Any, settings: dict[str, Any]) -> str:
+    """One-line "<count> <unit> · <order>" header for a normal album page.
+
+    Container albums (e.g. ``2025/``, listing sub-albums) report their
+    sub-album count and the gallery's album sort; leaf albums (e.g.
+    ``2025/12/``) report their photo count and the media sort. This mirrors how
+    sigal renders an album with album_list.html vs album.html.
+    """
+    subdirs = getattr(album, "albums", None) or []
+    if subdirs:
+        attr = settings.get("albums_sort_attr", "name")
+        if isinstance(attr, list):
+            attr = attr[0] if attr else "name"
+        label = _sort_label(attr, settings.get("albums_sort_reverse", False))
+        n = len(subdirs)
+        return f"{n} album{'' if n == 1 else 's'} · {label}"
+    label = _sort_label(
+        settings.get("medias_sort_attr", "filename"),
+        settings.get("medias_sort_reverse", False),
+    )
+    n = len(getattr(album, "medias", None) or [])
+    return f"{n} photo{'' if n == 1 else 's'} · {label}"
+
+
+def _sort_medias(medias: list[Any], attr: str, reverse: bool) -> list[Any]:
+    """Order medias the way sigal orders an album's own medias.
+
+    Mirrors ``sigal.gallery.Album.sort_medias`` (``attr`` is ``"filename"``,
+    ``"date"``, or ``"meta.<key>"``) so tag pages can sort like the rest of the
+    gallery instead of always sorting ascending by destination path.
+    """
+    if attr == "filename":
+        attr = "dst_filename"
+    if attr == "date":
+        return sorted(medias, key=lambda m: m.date or datetime.now(), reverse=reverse)
+    if attr.startswith("meta."):
+        meta_key = attr.split(".", 1)[1]
+        keygen = natsort_keygen(
+            key=lambda m: m.meta.get(meta_key, [""])[0], alg=ns.SIGNED | ns.LOCALE
+        )
+    else:
+        keygen = natsort_keygen(
+            key=lambda m: getattr(m, attr), alg=ns.SIGNED | ns.LOCALE
+        )
+    return sorted(medias, key=keygen, reverse=reverse)
+
+
 def precompute(gallery: Any) -> None:
     """gallery_initialized receiver: scan keywords once into shared state.
 
@@ -449,9 +536,11 @@ def build_tag_pages(gallery: Any) -> None:
         tag_slugs, base_dir, destination, output_file, options["month_names"]
     )
     # Tag pages are flat files (tag/<slug>.html) living directly in base_dir,
-    # alongside the tag-list index (tag/index.html). url_from_path normalizes
-    # the link back to the gallery's root index page.
+    # alongside the tag-list index (tag/index.html). index_url is the link back
+    # to the gallery's root index (used by the <h1> masthead); tag_index_url is
+    # the sibling tag-list index, the parent in every tag page's breadcrumb.
     index_url = url_from_path(os.path.relpath(destination / output_file, base_dir))
+    tag_index_url = url_from_path(output_file)
 
     cache_path = base_dir / ".tag_gallery_cache.json"
     try:
@@ -460,10 +549,14 @@ def build_tag_pages(gallery: Any) -> None:
     except (OSError, ValueError):
         cache = {}
 
-    # Captions link to other tag pages, so a page is also stale when the set of
-    # linkable tags changes (e.g. an edit to tag_gallery_exclude or min_count).
+    sort_attr, sort_reverse = _resolve_sort(settings, options)
+    sort_label = _sort_label(sort_attr, sort_reverse)
+    # A page is stale when the set of linkable tags changes (captions link to
+    # other tag pages, e.g. after an edit to tag_gallery_exclude or min_count)
+    # or when the media sort order changes (which reorders the thumbnails).
+    sort_key = f"{sort_attr}:{sort_reverse}"
     universe_sig = hashlib.sha256(
-        "\n".join(sorted(tag_slugs)).encode("utf-8")
+        ("\n".join(sorted(tag_slugs)) + "\n" + sort_key).encode("utf-8")
     ).hexdigest()[:16]
 
     page_writer = _TagPageWriter(settings, index_title=settings["title"])
@@ -475,7 +568,7 @@ def build_tag_pages(gallery: Any) -> None:
         page_path = base_dir / f"{slug}.html"
         if cache.get(slug) == sig and page_path.is_file():
             continue
-        ordered = sorted(medias, key=lambda m: m.dst_path)
+        ordered = _sort_medias(medias, sort_attr, sort_reverse)
         proxies = [_MediaProxy(m, base_dir, ctx) for m in ordered]
         album = _PseudoAlbum(
             title=f"{keyword} ({len(ordered)})",
@@ -483,9 +576,12 @@ def build_tag_pages(gallery: Any) -> None:
             output_file=f"{slug}.html",
             index_url=index_url,
             author=author,
-            description=f"{len(ordered)} photos tagged “{keyword}”.",
+            summary=f"{len(ordered)} photos · {sort_label}",
             medias=proxies,
-            breadcrumb=[(index_url, settings["title"]), ("", f"tag: {keyword}")],
+            breadcrumb=[
+                (tag_index_url, options["title"]),
+                (url_from_path(f"{slug}.html"), keyword),
+            ],
         )
         page_writer.write(album)
         written += 1
@@ -494,7 +590,7 @@ def build_tag_pages(gallery: Any) -> None:
     index_writer = _TagIndexWriter(settings, index_title=settings["title"])
     links = []
     for slug, (keyword, medias) in sorted(tags.items()):
-        ordered = sorted(medias, key=lambda m: m.dst_path)
+        ordered = _sort_medias(medias, sort_attr, sort_reverse)
         thumb_src = ordered[0]
         links.append(
             _TagLink(
@@ -505,14 +601,17 @@ def build_tag_pages(gallery: Any) -> None:
                 ),
             )
         )
+    # Tags are listed alphabetically by slug (the sorted() above), so the index
+    # order is always A–Z regardless of the per-tag thumbnail sort.
     index_album = _PseudoAlbum(
         title=options["title"],
         dst_path=str(base_dir),
         output_file=output_file,
         index_url=index_url,
         author=author,
+        summary=f"{len(links)} tag{'' if len(links) == 1 else 's'} · A–Z",
         albums=links,
-        breadcrumb=[(index_url, settings["title"]), ("", options["title"])],
+        breadcrumb=[(tag_index_url, options["title"])],
     )
     index_writer.write(index_album)
 
@@ -535,23 +634,22 @@ def link_album_captions(context: dict[str, Any]) -> None:
 
     sigal renders each album with a fixed ``{{ media.title }}`` caption; wrap
     the album so its medias' ``title`` becomes the filename-token caption linked
-    to tag pages. Our own tag/index pages (``_PseudoAlbum``) are skipped — they
-    render captions via the plugin template instead.
+    to tag pages, and expose a ``summary`` (count + sort order) for the header.
+    Our own tag/index pages (``_PseudoAlbum``) are skipped — they render their
+    captions and summary via the plugin template instead.
     """
     album = context.get("album")
-    if album is None or isinstance(album, _PseudoAlbum):
-        return
-    tag_slugs = _STATE.get("tag_slugs")
-    if not tag_slugs:
+    if album is None or isinstance(album, _PseudoAlbum) or not _STATE:
         return
     ctx = _LinkContext(
-        tag_slugs,
+        _STATE.get("tag_slugs") or set(),
         _STATE["base_dir"],
         _STATE["destination"],
         _STATE["output_file"],
         _STATE["options"]["month_names"],
     )
-    context["album"] = _AlbumCaptionWrapper(album, ctx)
+    summary = _album_summary(album, _STATE["settings"])
+    context["album"] = _AlbumCaptionWrapper(album, ctx, summary)
 
 
 def register(settings: dict[str, Any]) -> None:

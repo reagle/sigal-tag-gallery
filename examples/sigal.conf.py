@@ -12,6 +12,9 @@ tag_gallery = {
     "base_path": "tag",  # output dir under the gallery root -> /tag/<slug>.html
     "min_count": 1,      # skip tags with fewer than N images
     "title": "Tags",     # heading on the tag-list index page
+    # Thumbnail order on tag pages; None inherits medias_sort_* below.
+    "sort_attr": None,    # "filename" | "date" | "meta.<key>" | None
+    "sort_reverse": None,  # True | False | None
 }
 
 # Optional: tags to suppress entirely (no page, no caption links).

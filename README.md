@@ -11,7 +11,9 @@ It is a drop-in plugin: nothing in the installed `sigal` package is modified.
 ## Features
 
 - One flat page per keyword (`<base_path>/<slug>.html`) aggregating matching
-  photos from every album, plus a tag-list index.
+  photos from every album, plus a tag-list index. Each page opens with a
+  breadcrumb up to the tag-list index (`Tags » portland`) and a summary line
+  naming the count and thumbnail order (e.g. `131 photos · newest first`).
 - Pages render through your **active theme's templates**, so they match the
   rest of the site.
 - Relative links are recomputed for the tag-page location, so thumbnails and
@@ -69,6 +71,26 @@ existing lists rather than redefining them.
 | `min_count` | `1` | Skip keywords with fewer than this many images |
 | `title` | `"Tags"` | Heading/title of the tag-list index page |
 | `month_names` | `True` | Caption breadcrumb months as names (`June`) vs numbers (`06`) |
+| `sort_attr` | `None` | Thumbnail sort key; `None` inherits `medias_sort_attr` |
+| `sort_reverse` | `None` | Reverse thumbnail order; `None` inherits `medias_sort_reverse` |
+
+### Thumbnail order
+
+Tag pages and the tag-list index get their own media sort, independent of the
+album pages. Set `sort_attr` / `sort_reverse` inside the `tag_gallery` dict:
+
+```python
+tag_gallery = {
+    "sort_attr": "date",      # "filename", "date", or "meta.<key>"
+    "sort_reverse": True,     # newest-first
+}
+```
+
+Both use the same values and natural-sort semantics as sigal's
+`medias_sort_attr` / `medias_sort_reverse`. Leaving either at `None` (the
+default) inherits the gallery-wide setting, so tag pages match your albums
+unless you say otherwise. Changing either value re-renders every tag page (the
+order is part of the cache signature).
 
 ### Excluding tags
 
@@ -134,6 +156,24 @@ Note: when active, these captions show filename tokens, so a photo with a
 distinct IPTC/Markdown title will show its filename instead. Underscores in
 keywords render as hyphens.
 
+## Summary header on album pages (optional)
+
+The plugin also exposes `album.summary` on normal album pages — a one-line
+`<count> <unit> · <sort order>` matching the tag-page header (e.g.
+`31 photos · oldest first` on a leaf album, `12 albums · A–Z` on a container
+album that lists sub-albums). The count and sort label track sigal's own
+`medias_sort_*` / `albums_sort_*` settings. To show it, add this at the top of
+your theme's `album.html` **and** `album_list.html` `{% block content %}`:
+
+```jinja
+{% if album.summary is defined and album.summary %}
+<p class="gallery-summary">{{ album.summary }}</p>
+{% endif %}
+```
+
+The `is defined` guard keeps the theme working with the plugin disabled. Style
+`.gallery-summary` in your CSS as you like; tag pages emit the same element.
+
 ## How it works
 
 The plugin connects three sigal signals:
@@ -142,8 +182,8 @@ The plugin connects three sigal signals:
   `min_count` and `tag_gallery_exclude`, and caches the resulting tag set
   (so the scan runs once and both phases below agree on which tags have pages).
 - **`before_render`** — wraps each normal album so its photos expose
-  `name_parts` for the caption template above. Image/thumbnail links are
-  untouched.
+  `name_parts` for the caption template above, and the album exposes `summary`
+  for the header. Image/thumbnail links are untouched.
 - **`gallery_build`** — renders the per-tag pages and tag index through the
   theme templates with relpath-corrected links, then prunes stale pages.
 
