@@ -68,6 +68,7 @@ existing lists rather than redefining them.
 | `base_path` | `"tag"` | Output directory under the gallery root |
 | `min_count` | `1` | Skip keywords with fewer than this many images |
 | `title` | `"Tags"` | Heading/title of the tag-list index page |
+| `month_names` | `True` | Caption breadcrumb months as names (`June`) vs numbers (`06`) |
 
 ### Excluding tags
 

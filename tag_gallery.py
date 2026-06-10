@@ -57,6 +57,7 @@ DEFAULTS: dict[str, Any] = {
     "base_path": "tag",  # output dir under the gallery root
     "min_count": 1,  # skip tags with fewer than this many images
     "title": "Tags",  # title of the tag-list index page
+    "month_names": True,  # caption crumb months as names ("June") vs numbers ("06")
 }
 
 #: Per-build shared state, populated once on gallery_initialized and reused by
@@ -182,6 +183,7 @@ class _LinkContext:
     base_dir: Path  # directory the tag pages live in
     destination: Path  # gallery output root
     output_file: str  # index filename (e.g. "index.html")
+    month_names: bool = True  # show crumb months as names vs numbers
 
 
 class _MediaProxy:
@@ -238,7 +240,8 @@ class _MediaProxy:
             )
             href = url_from_path(os.path.relpath(target, self._page_dir))
             label = comp
-            if i > 0 and comp.isdigit() and int(comp) in _MONTHS:
+            is_month = i > 0 and comp.isdigit() and int(comp) in _MONTHS
+            if self._ctx.month_names and is_month:
                 label = calendar.month_name[int(comp)]
             crumbs.append((label, href))
         return crumbs
@@ -442,7 +445,9 @@ def build_tag_pages(gallery: Any) -> None:
     author = _STATE["author"]
     base_dir: Path = _STATE["base_dir"]
     tag_slugs: set[str] = _STATE["tag_slugs"]
-    ctx = _LinkContext(tag_slugs, base_dir, destination, output_file)
+    ctx = _LinkContext(
+        tag_slugs, base_dir, destination, output_file, options["month_names"]
+    )
     # Tag pages are flat files (tag/<slug>.html) living directly in base_dir,
     # alongside the tag-list index (tag/index.html). url_from_path normalizes
     # the link back to the gallery's root index page.
@@ -540,7 +545,11 @@ def link_album_captions(context: dict[str, Any]) -> None:
     if not tag_slugs:
         return
     ctx = _LinkContext(
-        tag_slugs, _STATE["base_dir"], _STATE["destination"], _STATE["output_file"]
+        tag_slugs,
+        _STATE["base_dir"],
+        _STATE["destination"],
+        _STATE["output_file"],
+        _STATE["options"]["month_names"],
     )
     context["album"] = _AlbumCaptionWrapper(album, ctx)
 
