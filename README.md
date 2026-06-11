@@ -160,8 +160,8 @@ keywords render as hyphens.
 
 The plugin also exposes `album.summary` on normal album pages — a one-line
 `<count> <unit> · <sort order>` matching the tag-page header (e.g.
-`31 photos · oldest first` on a leaf album, `12 albums · A–Z` on a container
-album that lists sub-albums). The count and sort label track sigal's own
+`31 photos · oldest first` on a leaf album, `12 albums · normal sort` on a
+container album that lists sub-albums). The count and sort label track sigal's own
 `medias_sort_*` / `albums_sort_*` settings. To show it, add this at the top of
 your theme's `album.html` **and** `album_list.html` `{% block content %}`:
 

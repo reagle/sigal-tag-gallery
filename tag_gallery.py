@@ -424,11 +424,11 @@ def _sort_label(attr: str, reverse: bool) -> str:
     >>> _sort_label("date", False)
     'oldest first'
     >>> _sort_label("filename", False)
-    'A–Z'
+    'normal sort'
     """
     if attr == "date":
         return "newest first" if reverse else "oldest first"
-    return "Z–A" if reverse else "A–Z"
+    return "reverse sort" if reverse else "normal sort"
 
 
 def _album_summary(album: Any, settings: dict[str, Any]) -> str:
@@ -602,14 +602,15 @@ def build_tag_pages(gallery: Any) -> None:
             )
         )
     # Tags are listed alphabetically by slug (the sorted() above), so the index
-    # order is always A–Z regardless of the per-tag thumbnail sort.
+    # order is always the normal (ascending) sort regardless of the per-tag
+    # thumbnail sort.
     index_album = _PseudoAlbum(
         title=options["title"],
         dst_path=str(base_dir),
         output_file=output_file,
         index_url=index_url,
         author=author,
-        summary=f"{len(links)} tag{'' if len(links) == 1 else 's'} · A–Z",
+        summary=f"{len(links)} tag{'' if len(links) == 1 else 's'} · normal sort",
         albums=links,
         breadcrumb=[(tag_index_url, options["title"])],
     )
