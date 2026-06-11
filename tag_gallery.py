@@ -612,7 +612,7 @@ def build_tag_pages(gallery: Any) -> None:
         author=author,
         summary=f"{len(links)} tag{'' if len(links) == 1 else 's'} · normal sort",
         albums=links,
-        breadcrumb=[(tag_index_url, options["title"])],
+        breadcrumb=[(index_url, "Gallery"), (tag_index_url, options["title"])],
     )
     index_writer.write(index_album)
 
